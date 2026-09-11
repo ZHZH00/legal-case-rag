@@ -50,13 +50,14 @@ flowchart TD
 - Python 3.11
 - FastAPI + Uvicorn
 - LangChain
-- LangGraph + PostgreSQL Checkpointer
+- LangGraph
+- PostgreSQL
 - Chroma
 - jieba + rank-bm25
 - RRF Hybrid Retrieval
 - Qwen3 Embedding 8B，1024维
 - Qwen3 Reranker 8B
-- DeepSeek V4 Flash 0731，中等推理强度
+- DeepSeek V4 Flash 0731
 - OpenRouter API
 
 ### 前端与部署
