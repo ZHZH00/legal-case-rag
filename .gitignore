@@ -1,0 +1,13 @@
+node_modules
+dist
+.venv
+.env
+backend/data/chroma/
+backend/data/lecardv2/
+backend/data/bm25/
+__pycache__
+*.pyc
+.DS_Store
+*.local
+.vscode/*
+!.vscode/extensions.json

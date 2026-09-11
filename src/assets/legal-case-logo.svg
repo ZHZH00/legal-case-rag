@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="title description">
+  <title id="title">中文刑事类案检索</title>
+  <desc id="description">裁判文书与放大镜组成的类案检索标志</desc>
+  <rect width="48" height="48" rx="11" fill="#176b62"/>
+  <path
+    d="M12.5 9.5h15l6 6v11.2a10 10 0 0 0-3.3-.6c-5.5 0-10 4.5-10 10H12.5a2 2 0 0 1-2-2V11.5a2 2 0 0 1 2-2Z"
+    fill="#fff"
+  />
+  <path d="M27.5 9.5v6h6" fill="none" stroke="#9bc8c2" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M15.5 19h12M15.5 24h9M15.5 29h5" fill="none" stroke="#176b62" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="31" cy="34" r="7" fill="#176b62" stroke="#d9efec" stroke-width="2.5"/>
+  <path d="m36.2 39.2 4.3 4.3" fill="none" stroke="#d9efec" stroke-width="3" stroke-linecap="round"/>
+</svg>

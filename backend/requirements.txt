@@ -1,0 +1,13 @@
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+langchain-core>=1.5.5,<2.0.0
+langchain>=1.0.0,<2.0.0
+langgraph>=1.0.0,<2.0.0
+langgraph-checkpoint-postgres>=3.0.0,<4.0.0
+psycopg[binary]>=3.2.0,<4.0.0
+langchain-openrouter==0.2.8
+openrouter>=0.11.46,<1.0.0
+python-dotenv>=1.1.0,<2.0.0
+chromadb>=1.0.0,<2.0.0
+jieba==0.42.1
+rank-bm25==0.2.2

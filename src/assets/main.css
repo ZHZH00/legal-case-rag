@@ -1,0 +1,813 @@
+/* 全局设计变量：集中维护主色、文字色、边框色，组件样式统一引用这些值。 */
+:root {
+  font-family:
+    Inter,
+    'PingFang SC',
+    'Microsoft YaHei',
+    system-ui,
+    -apple-system,
+    sans-serif;
+  color: #172423;
+  background: #f7f9f8;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --ink: #172423;
+  --muted: #6c7b79;
+  --line: #dfe7e5;
+  --soft: #f1f5f4;
+  --accent: #176b62;
+  --accent-dark: #10554e;
+  --sidebar: #f2f6f5;
+}
+
+/* 基础重置确保组件尺寸计算一致，并让应用占满浏览器可视高度。 */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  min-width: 320px;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(23, 107, 98, 0.38);
+  outline-offset: 2px;
+}
+
+/* 应用主骨架：左侧固定宽度 Sidebar，右侧聊天区占据剩余空间。 */
+.app-shell {
+  display: flex;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+/* Sidebar 自身是纵向弹性布局，历史区可伸缩，底部知识库不会被挤出屏幕。 */
+.sidebar {
+  width: 278px;
+  flex: 0 0 278px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 24px 16px 18px;
+  border-right: 1px solid var(--line);
+  background: var(--sidebar);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 8px 22px;
+}
+
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  display: block;
+  flex: 0 0 36px;
+}
+
+.brand h1 {
+  margin: 0 0 3px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.brand p {
+  margin: 0;
+  color: #81918e;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.new-chat-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 13px;
+  border: 1px solid #bfd1ce;
+  border-radius: 7px;
+  background: #fff;
+  color: #204a45;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.new-chat-button:hover {
+  border-color: #83aaa4;
+  background: #fbfdfc;
+}
+
+.new-chat-button span,
+.upload-entry span {
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* 聊天历史获得剩余高度；真正发生滚动的是内部 history-list。 */
+.history-section {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding-top: 25px;
+}
+
+.section-label {
+  margin: 0 9px 8px;
+  color: #7a8987;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.history-list {
+  min-height: 0;
+  overflow: hidden;
+  padding-right: 3px;
+}
+
+.history-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  margin-bottom: 3px;
+  border-radius: 6px;
+  background: transparent;
+  color: #526360;
+  font-size: 14px;
+}
+
+.history-select {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 7px 9px 11px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-select span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-item:hover {
+  background: #e8efed;
+  color: #263c39;
+}
+
+.history-item.active {
+  background: #dfeae7;
+  color: #174f48;
+  font-weight: 650;
+}
+
+.history-delete {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  margin-right: 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #7e908c;
+  font-size: 17px;
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.history-item:hover .history-delete,
+.history-item.active .history-delete,
+.history-delete:focus-visible {
+  opacity: 1;
+}
+
+.history-delete:hover {
+  background: #d5e1de;
+  color: #9a4037;
+}
+
+.history-icon {
+  color: #91a29f;
+  font-size: 15px;
+}
+
+/* 知识库面板不参与历史区滚动，始终停留在侧栏底部。 */
+.knowledge-panel {
+  flex: 0 0 auto;
+  padding: 17px 8px 0;
+  border-top: 1px solid #d8e2df;
+}
+
+.knowledge-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.database-icon {
+  position: relative;
+  width: 19px;
+  height: 16px;
+  margin-top: 2px;
+  border: 1.5px solid #6b8580;
+  border-radius: 50% / 24%;
+}
+
+.database-icon::after {
+  content: '';
+  position: absolute;
+  left: -1.5px;
+  right: -1.5px;
+  top: 5px;
+  height: 5px;
+  border-top: 1.5px solid #6b8580;
+  border-bottom: 1.5px solid #6b8580;
+  border-radius: 50%;
+}
+
+.knowledge-heading h2 {
+  margin: 0 0 5px;
+  font-size: 14px;
+}
+
+.knowledge-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.upload-entry {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 14px;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.upload-entry:hover {
+  color: var(--accent-dark);
+}
+
+/* 右侧工作区继续纵向拆为 Header、可滚动内容区和固定输入区。 */
+.chat-workspace {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+}
+
+.chat-header {
+  height: 72px;
+  flex: 0 0 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 clamp(24px, 4vw, 62px);
+  border-bottom: 1px solid #e7eceb;
+}
+
+.chat-header h2 {
+  margin: 0 0 4px;
+  color: #1d2c2a;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.chat-header p {
+  margin: 0;
+  color: #81908e;
+  font-size: 12px;
+}
+
+.system-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #71817e;
+  font-size: 12px;
+}
+
+.system-status i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4b9d7d;
+  box-shadow: 0 0 0 3px #e7f2ed;
+}
+
+/* 页面本身保持固定，只有中间聊天内容区允许用户手动上下滚动。 */
+.conversation-area {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 欢迎内容限制最大宽度并垂直居中，避免在大屏上过度铺开。 */
+.welcome-panel {
+  width: min(790px, calc(100% - 48px));
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  margin: 0 auto;
+  padding: clamp(18px, 4vh, 44px) 0 clamp(14px, 3vh, 34px);
+}
+
+.welcome-kicker {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 18px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+}
+
+.welcome-kicker span {
+  width: 28px;
+  height: 1px;
+  background: var(--accent);
+}
+
+.welcome-panel h2 {
+  margin: 0;
+  color: #1a2927;
+  font-size: clamp(27px, 3.1vw, 40px);
+  font-weight: 680;
+  line-height: 1.28;
+  letter-spacing: -0.045em;
+}
+
+.welcome-description {
+  margin: 18px 0 30px;
+  color: #6d7d7a;
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.example-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.example-card {
+  min-height: 118px;
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  grid-template-rows: 1fr auto;
+  column-gap: 10px;
+  padding: 17px 18px 14px;
+  border: 1px solid #dde6e4;
+  border-radius: 8px;
+  background: #fcfdfd;
+  text-align: left;
+}
+
+.example-number {
+  color: #96a5a2;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.example-text {
+  color: #293936;
+  font-size: 14px;
+  font-weight: 580;
+  line-height: 1.55;
+}
+
+.example-tag {
+  grid-column: 2;
+  align-self: end;
+  color: #78908b;
+  font-size: 12px;
+}
+
+/* 消息及来源区域保持统一阅读宽度；用户消息使用更窄的右对齐容器。 */
+.message-list {
+  padding: 26px 0 14px;
+}
+
+.message-row {
+  padding: 17px clamp(24px, 4vw, 62px);
+}
+
+.message-inner {
+  width: min(790px, 100%);
+  margin: 0 auto;
+}
+
+.message-user .message-inner {
+  display: flex;
+  width: min(790px, 100%);
+  margin: 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.message-user .message-content {
+  width: fit-content;
+  max-width: 80%;
+  padding: 13px 16px;
+  border: 1px solid #dfe6e8;
+  border-radius: 9px;
+  background: #f4f6f7;
+  overflow-wrap: anywhere;
+}
+
+.message-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+  color: #768582;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.message-avatar {
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #cbd8d5;
+  color: #4e6863;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.message-assistant .message-avatar {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.message-content {
+  color: #2e3e3b;
+  font-size: 15px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+/* 类案卡片紧跟在分析下方，展示模型实际引用的历史案件。 */
+.message-sources {
+  margin-top: 18px;
+}
+
+.message-sources h3 {
+  margin: 0 0 9px;
+  color: #5f716e;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.source-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 13px 14px;
+  border: 1px solid #dce6e3;
+  border-radius: 6px;
+  background: #f8faf9;
+}
+
+.source-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.source-report {
+  color: #304440;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.source-page {
+  color: #778986;
+  font-size: 11px;
+}
+
+.source-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.source-tags span {
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: #e8f1ef;
+  color: #46645f;
+  font-size: 11px;
+}
+
+.source-fact,
+.source-card details p {
+  margin: 0;
+  color: #465955;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.source-fact {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.source-card summary {
+  cursor: pointer;
+  color: #176b62;
+  font-size: 12px;
+}
+
+.source-card details p {
+  margin-top: 7px;
+  white-space: pre-wrap;
+}
+
+/* 输入区位于工作区底部，当前模板使用固定高度的 textarea。 */
+.input-area {
+  flex: 0 0 auto;
+  padding: 10px clamp(24px, 4vw, 62px) 16px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.1), #fff 26%);
+}
+
+.input-box {
+  width: min(790px, 100%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 auto;
+  padding: 10px 10px 10px 16px;
+  border: 1px solid #cbd8d5;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 4px 18px rgba(27, 56, 51, 0.06);
+}
+
+.input-box:focus-within {
+  border-color: #76a49d;
+  box-shadow: 0 4px 20px rgba(23, 107, 98, 0.09);
+}
+
+.input-box textarea {
+  min-height: 46px;
+  flex: 1;
+  resize: none;
+  padding: 3px 0;
+  border: 0;
+  outline: 0;
+  color: #283a37;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-y: auto;
+}
+
+.input-box textarea::placeholder {
+  color: #9aa6a4;
+}
+
+.send-button {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 0 15px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.send-button b {
+  width: 19px;
+  height: 19px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 50%;
+}
+
+.send-button:hover:not(:disabled) {
+  background: var(--accent-dark);
+}
+
+.send-button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.input-area > p {
+  margin: 7px auto 0;
+  color: #9aa5a3;
+  font-size: 10px;
+  text-align: center;
+}
+
+/* 笔记本窄窗口：收窄 Sidebar，示例问题改为单列。 */
+@media (max-width: 760px) {
+  .sidebar {
+    width: 218px;
+    flex-basis: 218px;
+    padding-inline: 11px;
+  }
+
+  .brand-mark,
+  .brand p,
+  .system-status {
+    display: none;
+  }
+
+  .brand {
+    padding-inline: 4px;
+  }
+
+  .brand h1 {
+    font-size: 14px;
+  }
+
+  .chat-header {
+    padding-inline: 18px;
+  }
+
+  .chat-header h2 {
+    font-size: 15px;
+  }
+
+  .welcome-panel {
+    width: calc(100% - 32px);
+  }
+
+  .example-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .example-card {
+    min-height: 96px;
+  }
+
+  .message-row,
+  .input-area {
+    padding-inline: 18px;
+  }
+}
+
+/* 较矮的笔记本窗口压缩欢迎页纵向尺寸，保证输入区和示例卡片同时留在视口内。 */
+@media (max-height: 820px) and (min-width: 761px) {
+  .welcome-panel {
+    padding: 18px 0 12px;
+  }
+
+  .welcome-kicker {
+    margin-bottom: 10px;
+  }
+
+  .welcome-panel h2 {
+    font-size: clamp(26px, 3vw, 34px);
+  }
+
+  .welcome-description {
+    margin: 12px 0 18px;
+    line-height: 1.6;
+  }
+
+  .example-card {
+    min-height: 94px;
+    padding: 14px 16px 12px;
+  }
+
+  .input-area {
+    padding-top: 8px;
+    padding-bottom: 10px;
+  }
+}
+
+/* 手机宽度仅保证基本可用：侧栏折叠为图标栏，主聊天区保留核心操作。 */
+@media (max-width: 520px) {
+  .sidebar {
+    width: 76px;
+    flex-basis: 76px;
+    padding-inline: 8px;
+  }
+
+  .brand {
+    justify-content: center;
+    padding-bottom: 16px;
+  }
+
+  .brand-mark {
+    display: grid;
+  }
+
+  .brand > div:last-child,
+  .new-chat-button:not(:focus) {
+    font-size: 0;
+  }
+
+  .new-chat-button {
+    justify-content: center;
+  }
+
+  .new-chat-button span {
+    font-size: 20px;
+  }
+
+  .section-label,
+  .history-item span:last-child,
+  .knowledge-heading div,
+  .upload-entry {
+    display: none;
+  }
+
+  .history-section {
+    padding-top: 16px;
+  }
+
+  .history-item {
+    justify-content: center;
+  }
+
+  .knowledge-heading {
+    justify-content: center;
+  }
+
+  .chat-header h2 {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .welcome-panel h2 br,
+  .welcome-description br {
+    display: none;
+  }
+}
