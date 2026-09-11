@@ -1,4 +1,4 @@
-/* 全局设计变量：集中维护主色、文字色、边框色，组件样式统一引用这些值。 */
+/* 定义全局颜色与布局变量。 */
 :root {
   font-family:
     Inter,
@@ -20,7 +20,7 @@
   --sidebar: #f2f6f5;
 }
 
-/* 基础重置确保组件尺寸计算一致，并让应用占满浏览器可视高度。 */
+/* 统一盒模型与页面基础样式。 */
 * {
   box-sizing: border-box;
 }
@@ -56,7 +56,7 @@ textarea:focus-visible {
   outline-offset: 2px;
 }
 
-/* 应用主骨架：左侧固定宽度 Sidebar，右侧聊天区占据剩余空间。 */
+/* 构建侧栏与聊天区主布局。 */
 .app-shell {
   display: flex;
   height: 100dvh;
@@ -65,7 +65,7 @@ textarea:focus-visible {
   background: #ffffff;
 }
 
-/* Sidebar 自身是纵向弹性布局，历史区可伸缩，底部知识库不会被挤出屏幕。 */
+/* 侧栏纵向排列导航内容。 */
 .sidebar {
   width: 278px;
   flex: 0 0 278px;
@@ -135,7 +135,7 @@ textarea:focus-visible {
   line-height: 1;
 }
 
-/* 聊天历史获得剩余高度；真正发生滚动的是内部 history-list。 */
+/* 聊天历史占据侧栏剩余空间。 */
 .history-section {
   min-height: 0;
   flex: 1;
@@ -231,7 +231,7 @@ textarea:focus-visible {
   font-size: 15px;
 }
 
-/* 知识库面板不参与历史区滚动，始终停留在侧栏底部。 */
+/* 知识库状态固定在侧栏底部。 */
 .knowledge-panel {
   flex: 0 0 auto;
   padding: 17px 8px 0;
@@ -294,7 +294,7 @@ textarea:focus-visible {
   color: var(--accent-dark);
 }
 
-/* 右侧工作区继续纵向拆为 Header、可滚动内容区和固定输入区。 */
+/* 工作区纵向排列页头、消息和输入框。 */
 .chat-workspace {
   min-width: 0;
   flex: 1;
@@ -344,7 +344,7 @@ textarea:focus-visible {
   box-shadow: 0 0 0 3px #e7f2ed;
 }
 
-/* 页面本身保持固定，只有中间聊天内容区允许用户手动上下滚动。 */
+/* 对话区域独立滚动。 */
 .conversation-area {
   min-height: 0;
   flex: 1;
@@ -352,7 +352,7 @@ textarea:focus-visible {
   overflow-x: hidden;
 }
 
-/* 欢迎内容限制最大宽度并垂直居中，避免在大屏上过度铺开。 */
+/* 欢迎内容居中并限制宽度。 */
 .welcome-panel {
   width: min(790px, calc(100% - 48px));
   height: 100%;
@@ -438,7 +438,7 @@ textarea:focus-visible {
   font-size: 12px;
 }
 
-/* 消息及来源区域保持统一阅读宽度；用户消息使用更窄的右对齐容器。 */
+/* 统一消息与来源区域宽度。 */
 .message-list {
   padding: 26px 0 14px;
 }
@@ -504,7 +504,7 @@ textarea:focus-visible {
   white-space: pre-wrap;
 }
 
-/* 类案卡片紧跟在分析下方，展示模型实际引用的历史案件。 */
+/* 展示回答实际引用的类案卡片。 */
 .message-sources {
   margin-top: 18px;
 }
@@ -590,7 +590,7 @@ textarea:focus-visible {
   white-space: pre-wrap;
 }
 
-/* 输入区位于工作区底部，当前模板使用固定高度的 textarea。 */
+/* 输入区固定使用内部滚动文本框。 */
 .input-area {
   flex: 0 0 auto;
   padding: 10px clamp(24px, 4vw, 62px) 16px;
@@ -673,7 +673,7 @@ textarea:focus-visible {
   text-align: center;
 }
 
-/* 笔记本窄窗口：收窄 Sidebar，示例问题改为单列。 */
+/* 适配窄屏笔记本布局。 */
 @media (max-width: 760px) {
   .sidebar {
     width: 218px;
@@ -721,7 +721,7 @@ textarea:focus-visible {
   }
 }
 
-/* 较矮的笔记本窗口压缩欢迎页纵向尺寸，保证输入区和示例卡片同时留在视口内。 */
+/* 压缩低高度窗口的欢迎区域。 */
 @media (max-height: 820px) and (min-width: 761px) {
   .welcome-panel {
     padding: 18px 0 12px;
@@ -751,7 +751,7 @@ textarea:focus-visible {
   }
 }
 
-/* 手机宽度仅保证基本可用：侧栏折叠为图标栏，主聊天区保留核心操作。 */
+/* 折叠手机端侧栏并保留核心操作。 */
 @media (max-width: 520px) {
   .sidebar {
     width: 76px;

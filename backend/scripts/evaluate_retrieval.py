@@ -1,4 +1,4 @@
-"""使用 LeCaRDv2 专家标签评测 BM25、Dense 或 Hybrid 类案检索。"""
+"""使用LeCaRDv2标签评测检索与重排策略。"""
 
 import argparse
 import json
@@ -10,12 +10,15 @@ from pathlib import Path
 
 from backend.services.hybrid_retriever import RRF_RANK_CONSTANT, retrieve_hybrid_cases
 from backend.services.keyword_retriever import retrieve_keyword_cases
-from backend.services.reranker import rerank_cases
+from backend.services.reranker import (
+    PROTECTED_HYBRID_COUNT,
+    rerank_cases,
+)
 from backend.services.retriever import retrieve_relevant_cases
 from backend.services.vector_store import get_cases_by_ids
 
 
-# 保证 Windows 终端可以正常显示中文评测结果。
+# Windows终端强制使用UTF-8。
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
@@ -25,7 +28,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = PROJECT_ROOT / "backend" / "data" / "lecardv2"
 EVALUATION_ROOT = DATA_ROOT / "evaluation"
 RANKING_POOL_PATH = DATA_ROOT / "label" / "ranking_pool.json"
-# 批量评测时主动放慢 Reranker 请求，避免触发服务商速率限制。
+# Reranker限流与重试配置。
 RERANK_DELAY_SECONDS = 20
 RERANK_RETRY_WAITS = [30, 60, 120]
 SPLIT_FILES = {
@@ -43,7 +46,8 @@ SPLIT_FILES = {
 
 
 def parse_arguments():
-    """读取检索方式、数据范围和 Top K 等评测参数。"""
+    """解析并校验评测参数。"""
+    # 定义评测方式、数据范围和数量参数。
     parser = argparse.ArgumentParser(description="评测 LeCaRDv2 类案检索效果")
     parser.add_argument(
         "--method",
@@ -53,6 +57,7 @@ def parse_arguments():
             "hybrid",
             "hybrid_rerank",
             "hybrid_rerank_fusion",
+            "rerank_ablation",
             "rerank_pool",
         ],
         default="bm25",
@@ -71,6 +76,7 @@ def parse_arguments():
         default=10,
         help="只评测前 N 条查询，传入 0 表示评测所选数据集的全部查询",
     )
+    # 拒绝无效数量参数。
     arguments = parser.parse_args()
     if arguments.top_k <= 0:
         parser.error("--top-k 必须大于 0")
@@ -80,10 +86,11 @@ def parse_arguments():
 
 
 def load_queries(path):
-    """从 JSONL 文件读取查询编号和用于检索的案件事实。"""
+    """读取JSONL格式的评测查询。"""
     if not path.exists():
         raise FileNotFoundError(f"没有找到查询文件：{path}")
 
+    # 逐行解析查询ID和案件事实。
     queries = []
     with path.open("r", encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
@@ -103,10 +110,11 @@ def load_queries(path):
 
 
 def load_qrels(path):
-    """读取 TREC 标签并整理为“查询 ID → 案件 ID → 相关等级”。"""
+    """读取TREC标签并按查询ID分组。"""
     if not path.exists():
         raise FileNotFoundError(f"没有找到标签文件：{path}")
 
+    # 重复标签保留最高相关等级。
     qrels = defaultdict(dict)
     with path.open("r", encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
@@ -129,10 +137,11 @@ def load_qrels(path):
 
 
 def load_ranking_pools(path):
-    """读取每条查询对应的100个官方重排候选案件。"""
+    """读取官方Reranker候选池。"""
     if not path.exists():
         raise FileNotFoundError(f"没有找到候选池文件：{path}")
 
+    # 建立查询ID到候选ID列表的映射。
     ranking_pools = {}
     with path.open("r", encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
@@ -152,19 +161,39 @@ def load_ranking_pools(path):
 
 
 def recall_at_k(retrieved_ids, relevant_ids, top_k):
-    """计算前 K 条结果找回了多少专家认定的相关案件。"""
+    """计算Top K相关案件覆盖率。"""
     if not relevant_ids:
         return 0.0
     hits = len(set(retrieved_ids[:top_k]) & relevant_ids)
     return hits / len(relevant_ids)
 
 
+def precision_at_k(retrieved_ids, relevant_ids, top_k):
+    """计算Top K相关案件占比。"""
+    hits = sum(
+        case_id in relevant_ids
+        for case_id in retrieved_ids[:top_k]
+    )
+    return hits / top_k
+
+
+def hit_rate_at_k(retrieved_ids, relevant_ids, top_k):
+    """计算Top K是否至少命中一次。"""
+    return float(
+        any(
+            case_id in relevant_ids
+            for case_id in retrieved_ids[:top_k]
+        )
+    )
+
+
 def ndcg_at_k(retrieved_ids, relevance_by_id, top_k):
-    """根据多级相关性计算前 K 条结果的排序质量。"""
+    """计算Top K多级相关性排序质量。"""
     dcg = sum(
         (2 ** relevance_by_id.get(case_id, 0) - 1) / math.log2(rank + 1)
         for rank, case_id in enumerate(retrieved_ids[:top_k], start=1)
     )
+    # 使用理想排序归一化DCG。
     ideal_relevances = sorted(relevance_by_id.values(), reverse=True)[:top_k]
     ideal_dcg = sum(
         (2**relevance - 1) / math.log2(rank + 1)
@@ -174,11 +203,22 @@ def ndcg_at_k(retrieved_ids, relevance_by_id, top_k):
 
 
 def reciprocal_rank(retrieved_ids, relevant_ids, top_k):
-    """计算第一个专家相关案件在前 K 条结果中的倒数排名。"""
+    """计算Top K首个相关结果的倒数排名。"""
     for rank, case_id in enumerate(retrieved_ids[:top_k], start=1):
         if case_id in relevant_ids:
             return 1 / rank
     return 0.0
+
+
+def calculate_metrics(retrieved_ids, relevance_by_id, relevant_ids, top_k):
+    """计算单条查询的全部指标。"""
+    return {
+        "precision": precision_at_k(retrieved_ids, relevant_ids, top_k),
+        "recall": recall_at_k(retrieved_ids, relevant_ids, top_k),
+        "hit_rate": hit_rate_at_k(retrieved_ids, relevant_ids, top_k),
+        "ndcg": ndcg_at_k(retrieved_ids, relevance_by_id, top_k),
+        "mrr": reciprocal_rank(retrieved_ids, relevant_ids, top_k),
+    }
 
 
 def rerank_cases_with_retry(
@@ -188,7 +228,7 @@ def rerank_cases_with_retry(
     min_score=None,
     relative_score_ratio=None,
 ):
-    """Reranker 触发429限流时，等待后自动重试。"""
+    """在Reranker限流时退避重试。"""
     for attempt in range(len(RERANK_RETRY_WAITS) + 1):
         try:
             rerank_arguments = {"top_k": top_k}
@@ -198,6 +238,7 @@ def rerank_cases_with_retry(
                 rerank_arguments["relative_score_ratio"] = relative_score_ratio
             return rerank_cases(fact, candidates, **rerank_arguments)
         except RuntimeError as error:
+            # 非限流异常不进入退避流程。
             is_rate_limit = (
                 "429" in str(error)
                 or "RATE_LIMIT_EXCEEDED" in str(error)
@@ -214,7 +255,7 @@ def rerank_cases_with_retry(
 
 
 def fuse_hybrid_and_reranker(fact, hybrid_candidates):
-    """用RRF融合Hybrid名次与Reranker名次，并保留全部候选供离线分析。"""
+    """融合Hybrid与Reranker名次。"""
     reranked_candidates = rerank_cases_with_retry(
         fact,
         hybrid_candidates,
@@ -227,6 +268,7 @@ def fuse_hybrid_and_reranker(fact, hybrid_candidates):
             "Reranker没有返回全部Hybrid候选，无法进行完整的排名融合"
         )
 
+    # 建立Hybrid与Reranker名次映射。
     hybrid_rank_by_id = {
         candidate["id"]: rank
         for rank, candidate in enumerate(hybrid_candidates, start=1)
@@ -236,6 +278,7 @@ def fuse_hybrid_and_reranker(fact, hybrid_candidates):
         for rank, candidate in enumerate(reranked_candidates, start=1)
     }
 
+    # 累加双路RRF分数。
     fused_candidates = []
     for candidate in reranked_candidates:
         case_id = candidate["id"]
@@ -255,6 +298,7 @@ def fuse_hybrid_and_reranker(fact, hybrid_candidates):
             }
         )
 
+    # 同分时优先原Hybrid名次。
     fused_candidates.sort(
         key=lambda candidate: (
             -candidate["fusion_score"],
@@ -265,8 +309,83 @@ def fuse_hybrid_and_reranker(fact, hybrid_candidates):
     return fused_candidates
 
 
+def retrieve_rerank_ablation_data(fact, top_k):
+    """获取消融实验共用的原始排序。"""
+    candidate_count = max(20, top_k)
+    hybrid_candidates = retrieve_hybrid_cases(
+        fact,
+        top_k=candidate_count,
+    )
+    reranked_candidates = rerank_cases_with_retry(
+        fact,
+        hybrid_candidates,
+        top_k=len(hybrid_candidates),
+        min_score=0,
+        relative_score_ratio=0,
+    )
+    if len(reranked_candidates) != len(hybrid_candidates):
+        raise RuntimeError(
+            "Reranker没有返回全部Hybrid候选，无法进行统一策略比较"
+        )
+
+    # 断点仅保存ID与分数。
+    return {
+        "hybrid_ids": [str(case["id"]) for case in hybrid_candidates],
+        "reranker_results": [
+            {
+                "id": str(case["id"]),
+                "rerank_score": float(case["rerank_score"]),
+            }
+            for case in reranked_candidates
+        ],
+    }
+
+
+def prepend_protected_cases(protected_ids, reranker_ids, top_k):
+    """拼接受保护案件与剩余重排结果。"""
+    protected_id_set = set(protected_ids)
+    remaining_ids = [
+        case_id
+        for case_id in reranker_ids
+        if case_id not in protected_id_set
+    ]
+    return (protected_ids + remaining_ids)[:top_k]
+
+
+def build_rerank_ablation_rankings(raw_result, top_k):
+    """从共用原始排名生成三种Top K策略。"""
+    hybrid_ids = raw_result["hybrid_ids"]
+    reranker_results = raw_result["reranker_results"]
+    reranker_ids = [result["id"] for result in reranker_results]
+    if not hybrid_ids or not reranker_ids:
+        return {
+            "hybrid": [],
+            "reranker": [],
+            "fixed_protection": [],
+        }
+
+    # 保护数受Top K和候选数约束。
+    actual_protected_count = min(
+        PROTECTED_HYBRID_COUNT,
+        top_k,
+        len(hybrid_ids),
+    )
+    hybrid_head_ids = hybrid_ids[:actual_protected_count]
+    fixed_ids = prepend_protected_cases(
+        hybrid_head_ids,
+        reranker_ids,
+        top_k,
+    )
+
+    return {
+        "hybrid": hybrid_ids[:top_k],
+        "reranker": reranker_ids[:top_k],
+        "fixed_protection": fixed_ids,
+    }
+
+
 def load_checkpoint(path):
-    """读取已经完成的逐查询评测结果，没有文件时返回空记录。"""
+    """读取评测断点。"""
     if not path.exists():
         return {}
     try:
@@ -275,6 +394,7 @@ def load_checkpoint(path):
     except (OSError, json.JSONDecodeError) as error:
         raise RuntimeError(f"评测断点文件无法读取：{path}") from error
 
+    # 断点主体必须是查询结果映射。
     results = payload.get("results", {})
     if not isinstance(results, dict):
         raise RuntimeError(f"评测断点文件格式错误：{path}")
@@ -282,7 +402,7 @@ def load_checkpoint(path):
 
 
 def save_checkpoint(path, method, split, top_k, results):
-    """每完成一条查询就原子保存结果，避免限流后丢失进度。"""
+    """原子保存逐查询评测断点。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "method": method,
@@ -290,6 +410,7 @@ def save_checkpoint(path, method, split, top_k, results):
         "top_k": top_k,
         "results": results,
     }
+    # 临时文件写完后原子替换。
     temporary_path = path.with_suffix(".tmp")
     with temporary_path.open("w", encoding="utf-8") as file:
         json.dump(payload, file, ensure_ascii=False, indent=2)
@@ -297,7 +418,7 @@ def save_checkpoint(path, method, split, top_k, results):
 
 
 def retrieve_cases(method, fact, top_k, query_id=None, ranking_pools=None):
-    """按照命令行选择调用项目现有的检索函数。"""
+    """按method分派检索流程。"""
     if method == "bm25":
         return retrieve_keyword_cases(fact, top_k=top_k)
     if method == "vector":
@@ -318,7 +439,7 @@ def retrieve_cases(method, fact, top_k, query_id=None, ranking_pools=None):
                 f"查询 {query_id} 的候选池有 {len(missing_ids)} 个案件不在 Chroma 中"
             )
 
-        # 官方候选池顺序仅用于解决 Reranker 同分，不参与主要相关性判断。
+        # 官方候选顺序仅作为同分依据。
         ranked_pool_cases = [
             {
                 **case,
@@ -329,7 +450,7 @@ def retrieve_cases(method, fact, top_k, query_id=None, ranking_pools=None):
         return rerank_cases_with_retry(fact, ranked_pool_cases, top_k)
 
     if method == "hybrid_rerank_fusion":
-        # 先取得20个Hybrid候选，再保留两套名次进行等权RRF融合。
+        # 融合Hybrid与Reranker名次。
         candidate_count = max(20, top_k)
         hybrid_candidates = retrieve_hybrid_cases(
             fact,
@@ -337,10 +458,114 @@ def retrieve_cases(method, fact, top_k, query_id=None, ranking_pools=None):
         )
         return fuse_hybrid_and_reranker(fact, hybrid_candidates)
 
-    # 完整流程先让 Hybrid 召回20个候选，再由 Reranker 精排出最终 Top K。
+    # 默认重排20个Hybrid候选。
     candidate_count = max(20, top_k)
     candidates = retrieve_hybrid_cases(fact, top_k=candidate_count)
     return rerank_cases_with_retry(fact, candidates, top_k)
+
+
+RERANK_ABLATION_LABELS = {
+    "hybrid": "Hybrid直接取前K名",
+    "reranker": "Reranker完全重排",
+    "fixed_protection": f"固定保护Hybrid前{PROTECTED_HYBRID_COUNT}名",
+}
+
+
+def evaluate_rerank_ablation(
+    queries,
+    qrels,
+    gold_qrels,
+    top_k,
+    split,
+    checkpoint_path,
+):
+    """比较三种共享原始结果的排序策略。"""
+    metric_names = ("precision", "recall", "hit_rate", "ndcg", "mrr")
+    metric_totals = {
+        strategy: {metric_name: 0.0 for metric_name in metric_names}
+        for strategy in RERANK_ABLATION_LABELS
+    }
+    # 复用已完成查询的原始排序。
+    checkpoint_results = load_checkpoint(checkpoint_path)
+    total = len(queries)
+    started_at = time.perf_counter()
+    cached_count = sum(
+        query["id"] in checkpoint_results
+        for query in queries
+    )
+    if cached_count:
+        print(
+            f"已加载断点：{cached_count}/{total} 条查询已经完成",
+            flush=True,
+        )
+
+    for position, query in enumerate(queries, start=1):
+        query_id = query["id"]
+        raw_result = checkpoint_results.get(query_id)
+        was_cached = raw_result is not None
+        # 仅为未缓存查询请求Reranker。
+        if raw_result is None:
+            try:
+                raw_result = retrieve_rerank_ablation_data(
+                    query["fact"],
+                    top_k,
+                )
+            except RuntimeError:
+                print(
+                    f"已保存 {len(checkpoint_results)}/{total} 条断点结果，"
+                    "下次运行相同命令将自动继续。",
+                    flush=True,
+                )
+                raise
+            checkpoint_results[query_id] = raw_result
+            save_checkpoint(
+                checkpoint_path,
+                "rerank_ablation",
+                split,
+                top_k,
+                checkpoint_results,
+            )
+
+        # 三种策略共享同一组标签。
+        rankings = build_rerank_ablation_rankings(raw_result, top_k)
+        relevance_by_id = qrels.get(query_id, {})
+        relevant_ids = set(gold_qrels.get(query_id, {}))
+        for strategy, retrieved_ids in rankings.items():
+            query_metrics = calculate_metrics(
+                retrieved_ids,
+                relevance_by_id,
+                relevant_ids,
+                top_k,
+            )
+            for metric_name in metric_names:
+                metric_totals[strategy][metric_name] += query_metrics[metric_name]
+
+        if position % 10 == 0 or position == total:
+            elapsed = time.perf_counter() - started_at
+            print(
+                f"进度：{position}/{total}，已用时 {elapsed:.1f} 秒",
+                flush=True,
+            )
+
+        # 新请求之间保留限流间隔。
+        has_unfinished_query = any(
+            later_query["id"] not in checkpoint_results
+            for later_query in queries[position:]
+        )
+        if not was_cached and has_unfinished_query:
+            print(
+                f"等待{RERANK_DELAY_SECONDS}秒后处理下一条……",
+                flush=True,
+            )
+            time.sleep(RERANK_DELAY_SECONDS)
+
+    return {
+        strategy: {
+            metric_name: total_value / total
+            for metric_name, total_value in strategy_totals.items()
+        }
+        for strategy, strategy_totals in metric_totals.items()
+    }
 
 
 def evaluate(
@@ -353,10 +578,17 @@ def evaluate(
     checkpoint_path=None,
     ranking_pools=None,
 ):
-    """逐条执行检索并返回三个指标的平均值。"""
-    metric_totals = {"recall": 0.0, "ndcg": 0.0, "mrr": 0.0}
+    """执行单一检索方式并汇总平均指标。"""
+    metric_totals = {
+        "precision": 0.0,
+        "recall": 0.0,
+        "hit_rate": 0.0,
+        "ndcg": 0.0,
+        "mrr": 0.0,
+    }
     started_at = time.perf_counter()
     total = len(queries)
+    # 网络型评测支持断点续跑。
     checkpoint_results = (
         load_checkpoint(checkpoint_path)
         if checkpoint_path is not None
@@ -376,6 +608,9 @@ def evaluate(
         query_id = query["id"]
         query_metrics = checkpoint_results.get(query_id)
         was_cached = query_metrics is not None
+        relevance_by_id = qrels.get(query_id, {})
+        relevant_ids = set(gold_qrels.get(query_id, {}))
+        # 无缓存时执行当前检索流程。
         if query_metrics is None:
             try:
                 results = retrieve_cases(
@@ -395,15 +630,17 @@ def evaluate(
                 raise
 
             retrieved_ids = [str(result["id"]) for result in results]
-            relevance_by_id = qrels.get(query_id, {})
-            relevant_ids = set(gold_qrels.get(query_id, {}))
             query_metrics = {
-                "recall": recall_at_k(retrieved_ids, relevant_ids, top_k),
-                "ndcg": ndcg_at_k(retrieved_ids, relevance_by_id, top_k),
-                "mrr": reciprocal_rank(retrieved_ids, relevant_ids, top_k),
+                **calculate_metrics(
+                    retrieved_ids,
+                    relevance_by_id,
+                    relevant_ids,
+                    top_k,
+                ),
                 "retrieved_ids": retrieved_ids,
             }
 
+            # 保存官方候选池诊断信息。
             if method == "rerank_pool":
                 pool_top_ids = ranking_pools[query_id][:top_k]
                 query_metrics.update(
@@ -424,6 +661,7 @@ def evaluate(
                     }
                 )
 
+            # 保存融合前后的名次和相关等级。
             if method == "hybrid_rerank_fusion":
                 hybrid_order = sorted(
                     results,
@@ -470,6 +708,7 @@ def evaluate(
                     }
                 )
 
+            # 每条查询完成后立即更新断点。
             if checkpoint_path is not None:
                 checkpoint_results[query_id] = query_metrics
                 save_checkpoint(
@@ -480,9 +719,19 @@ def evaluate(
                     checkpoint_results,
                 )
 
-        metric_totals["recall"] += query_metrics["recall"]
-        metric_totals["ndcg"] += query_metrics["ndcg"]
-        metric_totals["mrr"] += query_metrics["mrr"]
+        # 从旧断点补算新增指标。
+        if "precision" not in query_metrics or "hit_rate" not in query_metrics:
+            query_metrics.update(
+                calculate_metrics(
+                    query_metrics["retrieved_ids"],
+                    relevance_by_id,
+                    relevant_ids,
+                    top_k,
+                )
+            )
+
+        for metric_name in metric_totals:
+            metric_totals[metric_name] += query_metrics[metric_name]
 
         if method == "rerank_pool":
             print(
@@ -506,7 +755,7 @@ def evaluate(
             elapsed = time.perf_counter() - started_at
             print(f"进度：{position}/{total}，已用时 {elapsed:.1f} 秒", flush=True)
 
-        # 已有断点的查询不发起网络请求，因此也不需要等待。
+        # 仅在新网络请求之间等待。
         has_unfinished_query = any(
             later_query["id"] not in checkpoint_results
             for later_query in queries[position:]
@@ -557,12 +806,39 @@ def main():
     if arguments.method in {
         "hybrid_rerank",
         "hybrid_rerank_fusion",
+        "rerank_ablation",
         "rerank_pool",
     }:
         checkpoint_path = EVALUATION_ROOT / (
             f"{arguments.method}_{arguments.split}_top{arguments.top_k}.json"
         )
         print(f"断点文件：{checkpoint_path}")
+
+    if arguments.method == "rerank_ablation":
+        metrics_by_strategy = evaluate_rerank_ablation(
+            queries,
+            qrels,
+            gold_qrels,
+            arguments.top_k,
+            arguments.split,
+            checkpoint_path,
+        )
+        print("\n评测结果：")
+        print(
+            f"| 方案 | Precision@{arguments.top_k} | Recall@{arguments.top_k} | "
+            f"HitRate@{arguments.top_k} | NDCG@{arguments.top_k} | "
+            f"MRR@{arguments.top_k} |"
+        )
+        print("| --- | ---: | ---: | ---: | ---: | ---: |")
+        for strategy, label in RERANK_ABLATION_LABELS.items():
+            metrics = metrics_by_strategy[strategy]
+            display_label = label.replace("前K名", f"前{arguments.top_k}名")
+            print(
+                f"| {display_label} | {metrics['precision']:.4f} | "
+                f"{metrics['recall']:.4f} | {metrics['hit_rate']:.4f} | "
+                f"{metrics['ndcg']:.4f} | {metrics['mrr']:.4f} |"
+            )
+        return
 
     metrics = evaluate(
         arguments.method,
@@ -575,7 +851,9 @@ def main():
         ranking_pools,
     )
     print("\n评测结果：")
+    print(f"Precision@{arguments.top_k}: {metrics['precision']:.4f}")
     print(f"Recall@{arguments.top_k}: {metrics['recall']:.4f}")
+    print(f"HitRate@{arguments.top_k}: {metrics['hit_rate']:.4f}")
     print(f"NDCG@{arguments.top_k}: {metrics['ndcg']:.4f}")
     print(f"MRR@{arguments.top_k}: {metrics['mrr']:.4f}")
 

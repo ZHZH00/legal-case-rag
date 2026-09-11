@@ -4,14 +4,14 @@ import App from './App.vue'
 import { useChatStore } from './stores/chat'
 import './assets/main.css'
 
-// 应用只创建一次：App 是根组件，其他页面组件都从 App 的组件树向下展开。
+// 创建Vue应用与Pinia实例。
 const app = createApp(App)
 const pinia = createPinia()
 
-// 在 mount 之前注册 Pinia，使组件树中的任意组件都能访问聊天和知识库 Store。
+// 挂载前注册全局状态。
 app.use(pinia)
 
-// Pinia 状态变化时统一保存聊天记录，页面重启后由聊天 Store 自动读取。
+// 状态变更后持久化聊天记录。
 const chatStore = useChatStore(pinia)
 chatStore.$subscribe((_mutation, state) => {
   localStorage.setItem(
@@ -23,5 +23,5 @@ chatStore.$subscribe((_mutation, state) => {
   )
 })
 
-// 将整个 Vue 组件树挂载到 index.html 的 <div id="app">。
+// 挂载根组件。
 app.mount('#app')

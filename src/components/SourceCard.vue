@@ -1,5 +1,5 @@
 <script setup>
-// 每张卡片展示一个被回答实际引用的历史案件及其检索资料。
+// 接收单个引用案件。
 defineProps({
   source: { type: Object, required: true },
 })
@@ -7,6 +7,7 @@ defineProps({
 
 <template>
   <article class="source-card">
+    <!-- 展示案件标识与排序分数。 -->
     <div class="source-heading">
       <span class="source-report">案件 {{ source.case_id }}</span>
       <span class="source-page">检索分数 {{ source.score.toFixed(4) }}</span>
@@ -17,8 +18,10 @@ defineProps({
       <span>法条 {{ source.article || '未提供' }}</span>
     </div>
 
+    <!-- 核心事实默认展开。 -->
     <p class="source-fact">{{ source.fact }}</p>
 
+    <!-- 长说理与判决按需展开。 -->
     <details v-if="source.reason">
       <summary>查看法院说理</summary>
       <p>{{ source.reason }}</p>

@@ -1,16 +1,16 @@
 FROM python:3.11-slim
 
-# Python 日志立即输出到终端，并且不在容器中生成缓存文件。
+# 启用实时日志并禁用字节码缓存。
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 
-# 先安装依赖，requirements 没变化时可以复用 Docker 缓存。
+# 独立安装依赖以复用构建缓存。
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
-# 数据目录已经被 .dockerignore 排除，后面通过 Volume 单独挂载。
+# 复制后端代码，案件数据由Volume挂载。
 COPY backend ./backend
 
 EXPOSE 8000

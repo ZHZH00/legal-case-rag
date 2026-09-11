@@ -1,5 +1,5 @@
 <template>
-  <!-- 第一版展示已经入库的测试案件数量，暂时不提供用户上传功能。 -->
+  <!-- 展示知识库规模与状态。 -->
   <section class="knowledge-panel" aria-labelledby="knowledge-title">
     <div class="knowledge-heading">
       <span class="database-icon" aria-hidden="true" />

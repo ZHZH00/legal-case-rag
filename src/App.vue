@@ -6,17 +6,20 @@ import ChatMessage from './components/ChatMessage.vue'
 import ChatInput from './components/ChatInput.vue'
 import { useChatStore } from './stores/chat'
 
-// App 只负责组合页面，并根据当前消息决定显示欢迎页还是聊天内容。
+// 根组件读取共享聊天状态。
 const chatStore = useChatStore()
 </script>
 
 <template>
   <div class="app-shell">
+    <!-- 左侧导航与历史记录。 -->
     <Sidebar />
 
     <main class="chat-workspace">
+      <!-- 顶部系统状态。 -->
       <ChatHeader />
 
+      <!-- 空会话显示欢迎页，其余显示消息流。 -->
       <section class="conversation-area">
         <WelcomePanel v-if="chatStore.messages.length === 0" />
 
@@ -25,6 +28,7 @@ const chatStore = useChatStore()
         </div>
       </section>
 
+      <!-- 底部固定输入区。 -->
       <ChatInput />
     </main>
   </div>

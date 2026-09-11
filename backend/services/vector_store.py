@@ -1,4 +1,4 @@
-"""封装法律案件在本地 Chroma 中的创建、写入和查询。"""
+"""封装本地Chroma案件存储。"""
 
 from pathlib import Path
 
@@ -7,22 +7,22 @@ import chromadb
 from backend.services.embedding import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
 
 
-# 所有案件向量都持久化到项目内的 legal_cases Collection。
+# Chroma目录与Collection配置。
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CHROMA_DIRECTORY = PROJECT_ROOT / "backend" / "data" / "chroma"
 COLLECTION_NAME = "legal_cases"
-# 批量检查案件 ID，避免一次查询过多 ID 超过 SQLite 参数上限。
+# ID查询批量上限。
 ID_LOOKUP_BATCH_SIZE = 500
-# 分页读取案件，避免一次返回全部数据超过 SQLite 参数上限。
+# 全库读取分页大小。
 CASE_READ_BATCH_SIZE = 500
 
 
 def get_legal_case_collection():
-    """取得当前系统唯一使用的法律案件 Collection。"""
-    # 首次运行时自动创建 Chroma 目录，并使用该目录连接本地数据库。
+    """创建或复用法律案件Collection。"""
+    # 初始化持久化客户端。
     CHROMA_DIRECTORY.mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=str(CHROMA_DIRECTORY))
-    # Collection 不存在时创建，存在时直接复用原有案件数据。
+    # 复用同名Collection。
     collection = client.get_or_create_collection(
         name=COLLECTION_NAME,
         metadata={
@@ -33,7 +33,7 @@ def get_legal_case_collection():
         configuration={"hnsw": {"space": "cosine"}},
     )
 
-    # 旧向量只有在模型和维度相同时才能继续与新查询比较。
+    # 校验存量向量配置。
     stored_metadata = collection.metadata or {}
     if (
         stored_metadata.get("embedding_model") != EMBEDDING_MODEL
@@ -45,8 +45,8 @@ def get_legal_case_collection():
 
 
 def build_case_metadata(case):
-    """把不参与向量相似度计算的案件资料保存为 Metadata。"""
-    # Chroma Metadata 不保存列表，因此罪名和法条先拼接成字符串。
+    """构建Chroma案件Metadata。"""
+    # 列表字段序列化为字符串。
     return {
         "pid": case["pid"],
         "reason": case["reason"],
@@ -58,12 +58,12 @@ def build_case_metadata(case):
 
 
 def get_existing_case_ids(collection, cases):
-    """找出已经入库的案件，避免重复生成向量。"""
-    # 没有待检查案件时直接返回空集合，避免无意义的数据库查询。
+    """批量查询已存在的案件ID。"""
+    # 空输入不访问数据库。
     if not cases:
         return set()
 
-    # 分批查询 pid，并用集合提高后续判断速度。
+    # 分批查询并汇总ID集合。
     candidate_ids = [case["pid"] for case in cases]
     existing_ids = set()
     for start in range(0, len(candidate_ids), ID_LOOKUP_BATCH_SIZE):
@@ -74,15 +74,15 @@ def get_existing_case_ids(collection, cases):
 
 
 def upsert_cases(collection, cases, embeddings):
-    """把案件编号、事实原文、事实向量和其他案件资料写入 Chroma。"""
-    # 每条案件必须恰好对应一个向量，防止内容和向量错位。
+    """批量写入案件、向量和Metadata。"""
+    # 案件与向量必须一一对应。
     if len(cases) != len(embeddings):
         raise ValueError("案件数量与向量数量不一致")
-    # 空批次无需调用 Chroma。
+    # 空批次直接返回。
     if not cases:
         return
 
-    # pid、fact、向量和 Metadata 按相同顺序一次写入。
+    # 各字段按相同顺序写入。
     collection.upsert(
         ids=[case["pid"] for case in cases],
         documents=[case["fact"] for case in cases],
@@ -92,12 +92,12 @@ def upsert_cases(collection, cases, embeddings):
 
 
 def get_all_cases():
-    """读取全部案件事实和 Metadata，供 BM25 关键词索引使用。"""
+    """分页读取全部案件供BM25建索引。"""
     collection = get_legal_case_collection()
     cases = []
     collection_count = collection.count()
 
-    # BM25 不读取向量，只分页读取案件 ID、事实正文和 Metadata。
+    # 仅读取BM25所需字段。
     for offset in range(0, collection_count, CASE_READ_BATCH_SIZE):
         result = collection.get(
             limit=min(CASE_READ_BATCH_SIZE, collection_count - offset),
@@ -120,7 +120,7 @@ def get_all_cases():
 
 
 def get_cases_by_ids(case_ids):
-    """按照案件 ID 列表从 Chroma 取回案件事实和 Metadata。"""
+    """按ID批量读取案件。"""
     if not case_ids:
         return []
 
@@ -139,13 +139,13 @@ def get_cases_by_ids(case_ids):
         )
     }
 
-    # Chroma 不保证返回顺序，因此按调用者传入的 ID 顺序重新排列。
+    # 按请求ID恢复结果顺序。
     return [cases_by_id[case_id] for case_id in case_ids if case_id in cases_by_id]
 
 
 def query_cases(query_embedding, top_k=5):
-    """使用用户案情向量查询 Chroma，返回事实最相似的历史案件。"""
-    # 查询向量必须和建库向量维度一致。
+    """按查询向量返回Top K案件。"""
+    # 校验查询向量维度。
     if len(query_embedding) != EMBEDDING_DIMENSIONS:
         raise ValueError(
             f"查询向量应为 {EMBEDDING_DIMENSIONS} 维，实际为 {len(query_embedding)} 维"
@@ -153,20 +153,20 @@ def query_cases(query_embedding, top_k=5):
     if top_k <= 0:
         raise ValueError("top_k 必须大于 0")
 
-    # 空知识库没有可检索内容，因此直接返回空列表。
+    # 空Collection直接返回。
     collection = get_legal_case_collection()
     collection_count = collection.count()
     if collection_count == 0:
         return []
 
-    # Chroma 使用余弦距离取回最接近用户案情的 fact。
+    # 使用余弦距离执行向量查询。
     result = collection.query(
         query_embeddings=[query_embedding],
         n_results=min(top_k, collection_count),
         include=["documents", "metadatas", "distances"],
     )
 
-    # 将距离转换成直观分数，并恢复统一的案件结果结构。
+    # 转换为统一案件结果结构。
     return [
         {
             "id": case_id,

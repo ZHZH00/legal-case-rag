@@ -1,4 +1,4 @@
-"""组织类案检索、案件对比、模型回答和案件来源。"""
+"""编排类案Agent、检索与流式输出。"""
 
 from functools import lru_cache
 import re
@@ -15,25 +15,26 @@ from backend.services.llm import create_chat_model
 from backend.services.reranker import rerank_cases_with_hybrid_protection
 
 
-# Hybrid 先广泛召回二十件案件，保护头部结果后再由Reranker排列其余类案。
+# Reranker接收的Hybrid候选数量。
 RERANK_CANDIDATE_K = 20
 
 
 class CaseAgentState(AgentState):
-    """保存聊天消息，并用 last_cases 记住最近一次检索的四个案件。"""
+    """扩展Agent状态以保存最近类案。"""
 
-    # 新聊天可能还没有检索过案件，因此该字段可以暂时不存在。
+    # 新聊天允许暂时缺少检索结果。
     last_cases: NotRequired[list[dict]]
 
 
-# FastAPI启动时会把保持连接的PostgreSQL Checkpointer放到这里。
+# FastAPI生命周期注入Checkpointer。
 CASE_CHECKPOINTER = None
 
 
 @tool
 def retrieve_similar_cases(question: str, runtime: ToolRuntime) -> Command:
-    """当用户提供新的案件事实并要求查找类案时，检索最相似的历史刑事案件。"""
-    # Tool 内的进度信息会在后续由 Agent 流式入口转发给前端。
+    """检索并保存最相似的历史刑事案件。"""
+    # 发送Hybrid检索进度。
+    # 发送Reranker处理进度。
     runtime.stream_writer(
         {"type": "status", "message": "正在检索相似案件……"}
     )
@@ -52,7 +53,7 @@ def retrieve_similar_cases(question: str, runtime: ToolRuntime) -> Command:
             top_k=4,
         )
     except RuntimeError:
-        # Reranker 不可用时保留 Hybrid 前四名，避免整个 Agent 中断。
+        # Reranker失败时降级到Hybrid结果。
         runtime.stream_writer(
             {
                 "type": "status",
@@ -61,7 +62,7 @@ def retrieve_similar_cases(question: str, runtime: ToolRuntime) -> Command:
         )
         cases = candidate_cases[:4]
 
-    # last_cases 没有追加规则，因此新的四个案件会覆盖上一次结果。
+    # 新结果覆盖当前线程的last_cases。
     return Command(
         update={
             "last_cases": cases,
@@ -75,7 +76,7 @@ def retrieve_similar_cases(question: str, runtime: ToolRuntime) -> Command:
     )
 
 
-# Agent 根据用户当前问题和历史消息决定是否需要调用类案检索工具。
+# 系统提示词约束工具路由与回答边界。
 AGENT_SYSTEM_PROMPT = """你是中文刑事类案检索助手，不是代替律师作出法律结论的 AI 律师。
 
 工具使用规则：
@@ -96,7 +97,7 @@ AGENT_SYSTEM_PROMPT = """你是中文刑事类案检索助手，不是代替律�
 
 
 def build_context(cases):
-    """把检索结果的案件事实、说理和结果直接拼接成模型上下文。"""
+    """构建带编号的类案上下文。"""
     context_parts = []
     for index, case in enumerate(cases, start=1):
         metadata = case["metadata"]
@@ -118,8 +119,8 @@ def build_context(cases):
 
 
 def extract_cited_case_numbers(answer):
-    """提取类案引用，并兼容模型偶尔输出的中文数字或缺失方括号。"""
-    # 宽松读取引用可以避免“类案一”之类的格式偏差导致来源卡片全部丢失。
+    """提取中英文数字形式的类案编号。"""
+    # 宽松匹配常见类案引用格式。
     case_numbers = re.findall(r"类案\s*([一二三四五六七八九十\d]+)", answer)
     chinese_numbers = {
         "一": 1,
@@ -133,6 +134,7 @@ def extract_cited_case_numbers(answer):
         "九": 9,
         "十": 10,
     }
+    # 将中文序号转换为整数。
     normalized_numbers = [
         int(case_number)
         if case_number.isdigit()
@@ -147,23 +149,23 @@ def extract_cited_case_numbers(answer):
 
 
 def select_cited_cases(cases, cited_case_numbers):
-    """把模型返回的类案序号转换回真实案件，并忽略重复或越界序号。"""
-    # seen_numbers 用于避免同一案件在前端来源中重复出现。
+    """按引用序号选择有效案件。"""
+    # 集合用于去重引用编号。
     selected_cases = []
     seen_numbers = set()
     for case_number in cited_case_numbers:
-        # 重复编号和超出候选范围的编号都不会进入最终来源列表。
+        # 跳过重复或越界编号。
         if case_number in seen_numbers or not 1 <= case_number <= len(cases):
             continue
         seen_numbers.add(case_number)
-        # 模型编号从 1 开始，而 Python 列表下标从 0 开始。
+        # 类案序号转换为列表下标。
         selected_cases.append(cases[case_number - 1])
     return selected_cases
 
 
 def build_sources(cases):
-    """整理前端案件卡片需要的编号、事实、说理和判决结果。"""
-    # 这里只返回前端需要的字段，隐藏内部使用的排名信息。
+    """构建前端来源卡片数据。"""
+    # 排除前端无需展示的内部字段。
     return [
         {
             "case_id": case["id"],
@@ -180,7 +182,7 @@ def build_sources(cases):
 
 @dynamic_prompt
 def build_agent_prompt(request: ModelRequest) -> str:
-    """在每次调用模型前，把当前聊天最近检索的类案加入系统提示词。"""
+    """动态注入当前线程的最近类案。"""
     cases = request.state.get("last_cases", [])
     case_context = build_context(cases) if cases else "暂无。"
     return f"""{AGENT_SYSTEM_PROMPT}
@@ -191,10 +193,11 @@ def build_agent_prompt(request: ModelRequest) -> str:
 
 @lru_cache(maxsize=1)
 def get_case_agent():
-    """使用FastAPI启动时提供的PostgreSQL Checkpointer创建并复用Agent。"""
+    """创建并缓存持久化Agent。"""
     if CASE_CHECKPOINTER is None:
         raise RuntimeError("PostgreSQL Checkpointer尚未初始化")
 
+    # Agent共享检索工具、动态提示词和状态结构。
     return create_agent(
         model=create_chat_model(),
         tools=[retrieve_similar_cases],
@@ -205,19 +208,20 @@ def get_case_agent():
 
 
 def set_case_checkpointer(checkpointer):
-    """保存FastAPI生命周期内的Checkpointer，并清除旧Agent缓存。"""
+    """更新Checkpointer并失效Agent缓存。"""
     global CASE_CHECKPOINTER
     CASE_CHECKPOINTER = checkpointer
     get_case_agent.cache_clear()
 
 
 def stream_answer_question(question, thread_id):
-    """按 thread_id 运行 Agent，并把 Agent 事件转换为前端能读取的数据流。"""
-    # 用户输入在进入路由和检索之前先清理并检查空值。
+    """按thread_id流式运行Agent。"""
+    # 清理并校验用户输入。
     clean_question = question.strip()
     if not clean_question:
         raise ValueError("案件事实不能为空")
 
+    # thread_id绑定独立Checkpoint状态。
     agent = get_case_agent()
     config = {
         "configurable": {
@@ -226,6 +230,7 @@ def stream_answer_question(question, thread_id):
     }
     answer_parts = []
 
+    # 同时接收模型消息和工具自定义事件。
     for stream_part in agent.stream(
         {
             "messages": [
@@ -239,24 +244,24 @@ def stream_answer_question(question, thread_id):
         stream_mode=["messages", "custom"],
         version="v2",
     ):
-        # Tool 通过 custom 模式发送检索和重排进度。
+        # 转发工具状态事件。
         if stream_part["type"] == "custom":
             custom_event = stream_part["data"]
             if isinstance(custom_event, dict) and custom_event.get("type") == "status":
                 yield custom_event
             continue
 
-        # messages 模式同时会产生工具调用片段，这里只转发可见正文。
+        # 仅转发模型正文片段。
         if stream_part["type"] == "messages":
             message_chunk, _metadata = stream_part["data"]
             if not isinstance(message_chunk, AIMessageChunk):
                 continue
             if message_chunk.text:
-                # 正文一份发给前端，另一份留给后端判断引用了哪些类案。
+                # 同步累计正文用于引用解析。
                 answer_parts.append(message_chunk.text)
                 yield {"type": "token", "content": message_chunk.text}
 
-    # Agent 完成回答后，只把正文实际提到的最新类案作为来源卡片返回。
+    # 根据正文引用筛选最终来源卡片。
     generated_answer = "".join(answer_parts)
     state = agent.get_state(config)
     cases = state.values.get("last_cases", [])

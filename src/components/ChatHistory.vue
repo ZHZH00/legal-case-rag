@@ -1,7 +1,7 @@
 <script setup>
 import { useChatStore } from '../stores/chat'
 
-// 历史列表和右侧聊天区共享同一个 Store，切换后无需再向 App 手动传递消息。
+// 读取共享会话状态。
 const chatStore = useChatStore()
 </script>
 
@@ -9,7 +9,7 @@ const chatStore = useChatStore()
   <section class="history-section" aria-labelledby="history-title">
     <h2 id="history-title" class="section-label">聊天历史</h2>
     <div class="history-list">
-      <!-- 每一行分别提供会话切换按钮和删除按钮，避免两个按钮互相嵌套。 -->
+      <!-- 每项包含切换与删除操作。 -->
       <div
         v-for="chat in chatStore.chatHistory"
         :key="chat.id"

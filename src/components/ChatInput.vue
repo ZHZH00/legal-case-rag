@@ -5,14 +5,14 @@ import { useChatStore } from '../stores/chat'
 const chatStore = useChatStore()
 const question = ref('')
 
-// 发送按钮和 Enter 都调用这个函数：交给 Store 请求后端，然后清空输入框。
+// 提交非空问题并清空输入框。
 function submit() {
   if (!question.value.trim() || chatStore.loading) return
   chatStore.sendMessage(question.value)
   question.value = ''
 }
 
-// Enter 提交，Shift+Enter 保留原生换行行为。
+// Enter发送，Shift+Enter换行。
 function handleKeydown(event) {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
@@ -23,6 +23,7 @@ function handleKeydown(event) {
 
 <template>
   <footer class="input-area">
+    <!-- 固定高度文本框使用内部滚动。 -->
     <div class="input-box">
       <textarea
         v-model="question"

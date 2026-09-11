@@ -8,7 +8,7 @@ const chatStore = useChatStore()
 </script>
 
 <template>
-  <!-- 侧栏纵向布局：品牌和按钮固定，历史区伸缩滚动，知识库保持在底部。 -->
+  <!-- 侧栏包含品牌、会话和知识库状态。 -->
   <aside class="sidebar">
     <div class="brand">
       <img class="brand-mark" :src="legalCaseLogo" alt="中文刑事类案检索 Logo" />
@@ -18,7 +18,7 @@ const chatStore = useChatStore()
       </div>
     </div>
 
-    <!-- 新建会话直接调用共享 Store，右侧 App 会同步观察到 messages 被清空。 -->
+    <!-- 新建并切换到空会话。 -->
     <button class="new-chat-button" type="button" @click="chatStore.createChat">
       <span aria-hidden="true">＋</span>
       新建检索

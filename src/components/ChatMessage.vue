@@ -1,14 +1,14 @@
 <script setup>
 import SourceCard from './SourceCard.vue'
 
-// 接收并展示 chatStore 中的一条用户消息或 AI 消息。
+// 接收单条聊天消息。
 defineProps({
   message: { type: Object, required: true },
 })
 </script>
 
 <template>
-  <!-- role 生成不同样式类，决定用户消息靠右、AI 消息靠左。 -->
+  <!-- 按角色应用消息布局。 -->
   <article class="message-row" :class="`message-${message.role}`">
     <div class="message-inner">
       <div class="message-meta">
@@ -19,7 +19,7 @@ defineProps({
         {{ message.content }}
       </div>
 
-      <!-- 只有带有检索来源的 AI 消息才显示来源区，多条来源通过 v-for 逐个传给 SourceCard。 -->
+      <!-- 仅为带来源的助手消息渲染案件卡片。 -->
       <section
         v-if="message.role === 'assistant' && message.sources?.length"
         class="message-sources"

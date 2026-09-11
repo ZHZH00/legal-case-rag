@@ -10,7 +10,7 @@
 - 使用 jieba、BM25 完成关键词检索，并将索引持久化到本地。
 - 使用 RRF 融合 Dense 与 BM25 排名。
 - 从 Hybrid Top 20 候选中使用专用 Reranker 重排。
-- 对 Hybrid 头部结果进行条件保护，降低重排破坏高质量结果的风险。
+- 固定保护 Hybrid 前两名，降低重排破坏高质量结果的风险。
 - Reranker 不可用时自动降级为 Hybrid 结果，不中断问答。
 - 使用 LangChain Prompt、DeepSeek 模型生成最多四个类案的对比分析。
 - 使用 LangChain Agent 判断是否需要调用类案检索工具。
@@ -19,7 +19,7 @@
 - Vue 3 前端展示回答、案件事实、法院说理和判决结果。
 - 使用 localStorage 保存浏览器中的聊天记录。
 - 使用 Docker Compose、Nginx 运行完整前后端项目。
-- 使用 LeCaRDv2 专家相关性标签计算 Recall、NDCG 和 MRR。
+- 使用 LeCaRDv2 专家相关性标签计算 Precision、Recall、HitRate、NDCG 和 MRR。
 
 ## 系统流程
 
@@ -32,7 +32,7 @@ flowchart TD
     C --> E[RRF Hybrid 融合]
     D --> E
     E --> F[Top 20 候选案件]
-    F --> G[Reranker 重排与条件保护]
+    F --> G[Reranker 重排与头部保护]
     G --> H[Top 4 相似案件]
     H --> I[Agent结合最近类案与聊天上下文]
     I --> J[DeepSeek 生成类案对比]
@@ -259,32 +259,41 @@ Vite会在开发模式下把 `/api/chat` 转发到 `http://127.0.0.1:8000/chat`�
 
 项目使用LeCaRDv2测试查询和专家相关性标签评测检索结果。
 
-完整160条测试查询的Top 10基线结果：
+评测按照真实检索流程分为两层：Hybrid候选召回阶段使用Recall@20和HitRate@20，判断相关案件能否进入Reranker候选池；最终展示阶段使用Precision@4、NDCG@4和MRR@4评价返回给用户的四个案件，并保留Recall@4作为辅助指标。
 
-| 方法 | Recall@10 | NDCG@10 | MRR@10 |
-| --- | ---: | ---: | ---: |
-| BM25 | 0.1656 | 0.4483 | 0.6980 |
-| Dense | 0.1268 | 0.3370 | 0.5874 |
-| Hybrid | 0.1621 | 0.4413 | 0.7226 |
+完整160条测试查询的Top 20候选召回结果：
+
+| 方法 | Precision@20 | Recall@20 | HitRate@20 | NDCG@20 | MRR@20 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| BM25 | **0.3484** | **0.2664** | **0.9062** | **0.4044** | 0.7025 |
+| Dense | 0.2453 | 0.1970 | 0.8688 | 0.3004 | 0.5913 |
+| Hybrid | 0.3275 | 0.2566 | 0.8875 | 0.3923 | **0.7236** |
 
 Reranker受外部接口速率限制，因此策略比较使用20条查询的Top 4结果：
 
-| 方法 | Recall@4 | NDCG@4 | MRR@4 |
-| --- | ---: | ---: | ---: |
-| Hybrid | 0.0734 | 0.4685 | 0.6667 |
-| Reranker完全重排 | 0.0899 | 0.4292 | 0.6125 |
-| 固定保护Hybrid前2名 | 0.0823 | 0.4672 | 0.6958 |
-| 条件保护，阈值70% | 0.0823 | 0.4685 | 0.6917 |
+| 方法 | Precision@4 | Recall@4 | HitRate@4 | NDCG@4 | MRR@4 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Hybrid直接取前4名 | 0.4875 | 0.0734 | 0.8000 | **0.4679** | 0.6667 |
+| Reranker完全重排 | **0.5000** | **0.0904** | 0.8000 | 0.4327 | 0.6083 |
+| 固定保护Hybrid前2名 | 0.4875 | 0.0739 | **0.8500** | 0.4608 | **0.6833** |
 
-实验表明，完全重排提高了Top 4召回，但可能降低头部排序质量。生产流程因此采用“Hybrid头部结果达到最高Reranker分数70%时才保护”的折中策略。
+实验表明，完全重排提高了Top 4的Precision和Recall，但可能降低头部排序质量。固定保护Hybrid前两名后，HitRate@4由0.8000提升至0.8500，MRR@4由0.6667提升至0.6833，同时保持Precision基本不变，因此生产流程采用固定头部保护策略。
 
 运行完整BM25、Dense和Hybrid评测：
 
 ```powershell
-python -m backend.scripts.evaluate_retrieval --method bm25 --split test --top-k 10 --limit 0
-python -m backend.scripts.evaluate_retrieval --method vector --split test --top-k 10 --limit 0
-python -m backend.scripts.evaluate_retrieval --method hybrid --split test --top-k 10 --limit 0
+python -m backend.scripts.evaluate_retrieval --method bm25 --split test --top-k 20 --limit 0
+python -m backend.scripts.evaluate_retrieval --method vector --split test --top-k 20 --limit 0
+python -m backend.scripts.evaluate_retrieval --method hybrid --split test --top-k 20 --limit 0
 ```
+
+评测Hybrid前四名、Reranker完全重排和固定保护前两名时，三种方案会共用同一次Reranker结果并输出一张对比表：
+
+```powershell
+python -m backend.scripts.evaluate_retrieval --method rerank_ablation --split test --top-k 4 --limit 20
+```
+
+该命令会把每条查询的Hybrid候选顺序和Reranker原始分数保存到断点文件。再次运行相同命令会复用已有结果，不会为已完成的查询重复请求Reranker。
 
 `--limit 0` 表示评测所选数据集中的全部查询。Reranker评测会调用外部接口，执行前需要考虑费用和速率限制。
 
@@ -301,7 +310,7 @@ python -m backend.scripts.evaluate_retrieval --method hybrid --split test --top-
 │   │   ├── retriever.py           Dense检索
 │   │   ├── keyword_retriever.py   BM25索引与检索
 │   │   ├── hybrid_retriever.py    RRF融合
-│   │   ├── reranker.py            重排、过滤与条件保护
+│   │   ├── reranker.py            重排、过滤与头部保护
 │   │   ├── rag.py                 Agent、RAG工具和流式事件
 │   │   └── llm.py                 对话模型配置
 │   └── scripts/
