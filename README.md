@@ -26,19 +26,19 @@
 ```mermaid
 flowchart TD
     A[用户输入] --> B{Agent是否需要检索}
-    B -- 否 --> L[结合聊天上下文直接回答]
-    B -- 是 --> C[Dense 语义检索]
-    B -- 是 --> D[BM25 关键词检索]
-    C --> E[RRF Hybrid 融合]
-    D --> E
-    E --> F[Top 20 候选案件]
-    F --> G[Reranker 重排与头部保护]
-    G --> H[Top 4 相似案件]
-    H --> I[Agent结合最近类案与聊天上下文]
-    I --> J[DeepSeek 生成类案对比]
-    L --> K[NDJSON 流式返回]
-    J --> K
-    K --> M[Vue 展示回答与案件来源]
+    B -- 否 --> C[DeepSeek结合聊天上下文直接回答]
+    B -- 是 --> D[Agent调用类案检索工具]
+    D --> E[Dense语义检索]
+    E --> F[BM25关键词检索]
+    F --> G[RRF Hybrid融合]
+    G --> H[Top 20候选案件]
+    H --> I[Reranker重排]
+    I --> J[固定保护Hybrid前2名并选出Top 4]
+    J --> K[更新当前线程的last_cases]
+    K --> L[DeepSeek结合类案与聊天上下文生成分析]
+    C --> M[NDJSON流式返回]
+    L --> M
+    M --> N[Vue展示回答与来源卡片]
 ```
 
 检索阶段只对 `fact` 生成向量。案件命中后，再从 Chroma Metadata 中读取 `reason`、`result`、`charge` 和 `article` 提供给大模型及前端。
